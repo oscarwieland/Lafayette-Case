@@ -1,4 +1,4 @@
-# Lafayette-Case
+# Uncovering Galeries Lafayette's Brand Equity Through Factor Analysis and SEM
 
 In this comprehensive project, I undertook an in-depth analysis to uncover the key drivers of brand equity for Galeries Lafayette. The goal was to understand how customers perceive the brand and how these perceptions influence their loyalty and commitment.
 
