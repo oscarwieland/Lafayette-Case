@@ -1,0 +1,759 @@
+---
+title: "CaseStudy3"
+author: "Oscar Wieland, Pablo Huber"
+date: "2024-05-15"
+output:  
+    prettydoc::html_pretty:
+    theme: cayman
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Preparation 
+```{r}
+rm(list = ls()) #Clean the entire environment
+cat("\014") # clean console
+```
+#### Install required packages
+```{r}
+
+
+```
+
+
+
+#### Import required packages
+```{r, message = FALSE, warning=FALSE}
+library(rcompanion)   # Histogram and Normal Curve
+library(nortest) # Kolmogorov-Smirnov-Test
+library(corrplot) #C orrelation matrix plot
+#library(olsrr)  # VIF and Tolerance Values
+library(dplyr)
+library(pastecs)
+library(REdaS) # Bartelett's Test
+library(psych)
+library(lm.beta)
+library(mice) # MCAR plot
+library(naniar) # MCAR test
+library(VIM) # Visualisation of missing values
+library(lavaan) 
+library(semPlot)
+library(psy)
+```
+
+
+
+## Context and goal
+
+
+We have been contacted by Frederic Fuchsbau, the marketing manager of Galeries Lafayette, to understand customers perception of the company and to explore how these perceptions impact their loyalty and commitment. The main objective of the project is to pinpoint the primary factors that contribute to Galeries Lafayette's brand equity.
+
+He provides us with a dataset containing questions and answers of a questionnaire from 553 customers. This dataset includes various items that evaluate perceptions of the company's image, loyalty, commitment, and other relevant factors. The question were answered on a scale ranging from 1 to 7. Here is the dataset: 
+
+```{r}
+survey = read.csv("Case Study III_Structural Equation Modeling.csv")
+head(survey, n=1)
+```
+After a quick review of the data, we've noticed that some entries are recorded as 999. Since the scale we're using ranges only up to 7, we've decided to interpret these 999 values as representing missing or unavailable data (NA). Therefore, we'll proceed to identify and manage all NA entries appropriately.
+
+```{r}
+survey =data.frame(sapply(survey,function(x) ifelse((x==999),NA,as.numeric(x))))
+head(survey, n=1)
+```
+
+
+First of all, we will focus on understanding the dimensions through which customers perceive Galeries Lafayette. As a result, we will specifically analyze the questions pertaining to these dimensions (Image1 to Image22):
+
+```{r}
+IM = survey[,paste0("Im", seq(1, 22))]
+head(IM)
+```
+
+
+### Missing values
+
+
+
+Let's examine the NA values in the dataset for further analysis.
+```{r}
+list_na =colnames(IM)[apply(IM,2,anyNA)]
+list_na
+```
+
+
+```{r}
+gg_miss_var(IM)
+```
+
+We have many missing values. While one approach could involve replacing these NAs with the mean or median, doing so might risk reducing the variance in the data. Therefore, we have opted for the simplest solution, which is to remove all instances of missing values. Even after this step, we still have a considerable amount of information available for analysis.
+
+Removing the rows with missing values shrink the dataset from 553 rows to 385:
+```{r}
+IM = na.omit(IM)
+dim(IM)
+```
+
+
+
+## Question 1
+
+First we will perform an exploratory factor analysis to get an initial idea by which dimensions customers perceive Galeries Lafayette.
+
+## Exploratory factor analysis
+
+
+#### Correlation among variables
+
+The first step of a factor analysis is to analyze the correlation matrix. It will help us asses the relationships among variables.
+
+If variables are highly correlated, it suggests that they are likely explaining similar phenomena, facilitating the extraction of common factors.
+```{r}
+raqMatrix = cor(IM)
+corrplot(as.matrix(raqMatrix), type = "lower", tl.cex=0.7)
+# If you want the numbers:  corrplot(as.matrix(raqMatrix), type = "lower", tl.cex=0.7,method="number", number.cex=0.3, number.font=1)
+```
+They all seem to be correlated with other variables, we will now do some statistical tests to asses the significance of those correlations.
+
+
+#### Bartlett’s Test of sphericity
+
+This test assesses whether there are significant correlations among the variables in the dataset. The null hypothesis of the test is that all variables are uncorrelated. Therefore, a small p-value from the test indicates evidence to reject the null hypothesis, suggesting that the variables are indeed correlated. 
+
+```{r}
+bart_spher(IM)
+```
+We have a small p-value so we can reject the null hypothesis, which indicates that some variables are correlated.  
+
+
+#### KMO
+
+
+KMO provides information about the proportion of variance in the variables that might be caused by underlying factors.
+
+It is the ratio of the sum of squared correlations to the sum of squared correlations plus the sum of squared partial correlations:
+
+$$ KMO = \frac{\text{Sum of Squared Correlations}}{\text{Sum of Squared Correlations} + \text{Sum of Squared Partial Correlations}} $$
+
+This means that a high KMO is associated with a small sum of squared partial correlations. This suggests that a greater proportion of the variance among the variables is shared, rather than being unique to individual variables.
+
+Higher values indicate more suitable data for factor analysis. The criterion is that the KMO should be above 0.6.
+
+```{r}
+KMOTEST=KMOS(IM)
+KMOTEST$KMO
+```
+We have a value higher than 0.6 which means it's good for factor analysis.
+
+
+#### Anti-Image
+
+If a value in the diagonal is below 0.5, the corresponding variable might be removed from factor analysis. The value on the diagonal represent the Measure of Sampling Adequacy (MSA) for each variable. It indicates how well each variable correlate with all the other variables and thus indicate if they share common factors, the closer to 1 the better (however a extremely high value might indicate that there is to much redundancy in some questions).
+
+```{r}
+#Here the values are the diagonal elements for each vairable
+sort(KMOTEST$MSA)
+```
+All variables are higher than 0.5. No need to remove some variables. 
+
+### PCA
+
+Before performing the factor analysis, we should carefully choose the number of factors. To do so, we use the kaiser criterion and the scree-test.
+
+#### Scree-test and kaiser criterion
+```{r}
+PC0 = principal(IM, 
+                        rotate="varimax", scores=TRUE)
+
+
+plot(PC0$values,xlab="Factor Number",ylab="Eigenvalue",main="Scree plot",cex.lab=1.2,cex.axis=1.2,cex.main=1.8)+abline(h=1)
+```
+```{r}
+EigenValue=PC0$values
+Variance=EigenValue/ncol(IM)*100
+SumVariance=cumsum(EigenValue/ncol(IM))
+Total_Variance_Explained=cbind(EigenValue=EigenValue[EigenValue>0],Variance=Variance[Variance>0],Total_Variance=SumVariance[Variance>0])
+Total_Variance_Explained
+```
+
+The scree-plot is a graphical representation of eigen values by ordering them according to their size. To choose the number of factors, the rule of thumb is to choose the number  before the elbow of the curve. Unfortunately, this criterion is not very clear and different people may have different choice of the elbow. Thus, it is important to include the kaiser criterion. This criterion says that only factors with eigen value higher than 1 should be extracted. 
+
+Using these two criteria and knowing the lack of precision, we decide to test different situations around the kaiser criterion. But first we will try the solution of the kaiser criterion which suggest the use of 6 factors. 
+
+The first component has an eigenvalue of 8.98 indicating that it can explain around 40.8% of the overall variance. The 6 derived factors explain a total variance of 76.6%, the 7 derived factors 80.3% and the 8 derived factord 83.5%.
+
+
+
+#### PCA with 6 factors
+```{r}
+PCA6 = principal(IM, rotate="varimax",nfactors=6, scores=TRUE)
+print(PCA6$loadings, cutoff=0.3,sort=TRUE)
+```
+
+We can see that the results are not very clear. There are many loadings smaller than 0.7 indicating sub-optimal performance. Moreover, certain variables load onto multiple factors, further complicating the analysis.Therefore, we will follow the suggestions of the kaiser criterion which suggest to explorie solutions involving an additional one or two factors.We experimented with subtracting one or two factors, but the outcomes did not yield satisfactory results.
+
+
+
+First, let's try with 1 additional factor
+
+#### PCA with 7 factors
+```{r}
+PCA7 = principal(IM, rotate="varimax",nfactors=7, scores=TRUE)
+print(PCA7$loadings, cutoff=0.3,sort=TRUE)
+```
+
+Every variable has a loading, but things are a bit messy. Many variables are loading on more than one factor, and there are also some small loadings. So, we're thinking of trying a PCA with more factors since a lot of variables are loading on multiple factors.
+
+
+#### PCA with 8 factors
+```{r}
+PCA8 = principal(IM, rotate="varimax",nfactors=8, scores=TRUE)
+print(PCA8$loadings, cutoff=0.3,sort=TRUE)
+```
+
+We have observed a reduction in the number of variables loading on multiple factors, and the loadings have also increased compared to previous iterations. However, there are still a few variables with relatively low loadings on two factors (less than 0.7), indicating weaker correlations. Therefore, it's important to be cautious with these variables. Specifically, variables Im 8, 9, and 15 exhibit this behavior.
+
+
+
+```{r, fig.width=10, fig.height=15}
+fa.diagram(PCA8$loadings, main="Principal component analysis with 8 factors")
+```
+
+
+
+
+
+
+
+#### Interpretation
+
+Now that we have identified the factors, it's crucial to understand what these factors represent. Therefore, we need to examine the items that constitute them and interpret the factors accordingly. We will help ourselves from the literature review on quality dimensions. 
+
+RC1 (Im 3,4,5):  decoration <br/>
+RC2 (Im 8,10,14): Haute cuisine.<br/> In this case, it appears that Im8 is connected to the other two variables because it pertains to French culture, which is famous for its cuisine.<br/>
+
+RC3 (Im 20,21,22): Ambiance <br/>
+RC4 (Im 11,12,13): Prestigious brands <br/>
+RC5 (Im 1,2,15): Assortment <br/> Here, it's evident that Im15 doesn't align well with the other two variables. Recall that we previously observed Im15's relatively low loading on this factor. Hence, we've made the decision to remove this variable from consideration.<br/>
+RC6 (Im 17,18):  Stylish <br/>
+RC7 (Im 16,19): Professional <br/>
+RC8 (Im 6,7,9):  France <br/> We've chosen to retain im9 because it demonstrates a connection with the other two questions.
+
+
+#### PCA with 8 factors Without 15 
+```{r}
+IM <- IM %>% select(-Im15)
+PCA8 = principal(IM, rotate="varimax",nfactors=8, scores=TRUE)
+print(PCA8$loadings, cutoff=0.3,sort=TRUE)
+```
+
+
+
+```{r, fig.width=10, fig.height=15}
+fa.diagram(PCA8$loadings, main="Principal component analysis with 8 factors")
+```
+
+After deleting Im8, we can see that the factors didn't change. We have:  
+
+RC1 (Im 3,4,5):  decoration <br/>
+RC2 (Im 8,10,14): Haute_cuisine <br/> 
+RC3 (Im 20,21,22): Ambiance <br/>
+RC4 (Im 11,12,13): Prestigious_brands <br/>
+RC5 (Im 1,2): Assortment <br/> 
+RC6 (Im 17,18):  Stylish <br/>
+RC7 (Im 16,19): Professional <br/>
+RC8 (Im 6,7,9):  France <br/> 
+
+
+Now we can perform a confirmatory factor analysis to validate the factor structure identified in the exploratory analysis and assess the fit of the proposed model to the data.
+
+## Confirmatory factor analysis 
+
+Our model is: 
+```{r}
+model = "
+
+decoration =~ Im3 + Im4 + Im5
+
+Haute_cuisine =~ Im8 + Im10 + Im14
+
+Ambiance =~ Im20 + Im21 + Im22
+
+Prestigious_brands =~ Im11 + Im12 + Im13
+
+Assortment =~ Im1 + Im2
+
+Stylish =~ Im17 + Im18
+
+Professional =~ Im16 + Im19
+
+France =~ Im6 + Im7 + Im9
+
+"
+
+```
+
+
+### Fit assessment
+
+#### Global fit
+```{r}
+fit = cfa(model, data=IM, missing="ML")
+summary_fit=summary(fit, fit.measures=TRUE,standardized=TRUE)
+summary_fit
+```
+
+First, we should assess the global fit. Different test exist:
+```{r}
+summary_fit$fit[c("chisq","df","rmsea","cfi")]
+```
+
+- Chi2-test: We have to look at the ratio Chi2-value/df. This should be below 5 for samples up to 1000. We have 553 observations. In our case, it is 472.925/161 = 2.937, which is less than 5 so the fit of the model is good.
+
+- Root mean square error of approximation (RMSEA): It measures the discrepancy between the observed covariance matrix and the model-implied covariance matrix, with lower values indicating better fit. In our case, it is 0.071 which means that our result is acceptable.
+
+- Comparative fit index (CFI): It measures the proportional improvement of fit by comparing the target model with a more restricted baseline model. Therefore, it evaluates how well the proposed model fits the data by comparing it to a baseline model.
+The goal is to have a high value. In our case, it is 0.948. This means we have a huge under rejection rates for missspecified models (close to acceptable)
+
+
+#### Local fit measures
+
+##### Individual item reliability
+```{r}
+std.loadings<- inspect(fit, what="std")$lambda
+check=std.loadings
+check[check>0] <- 1
+std.loadings[std.loadings==0] <- NA
+std.loadings2 <- std.loadings^2
+std.theta<- inspect(fit, what="std")$theta
+
+#Individual item Reliability
+IIR=std.loadings2/(colSums(std.theta)+std.loadings2)
+IIR
+```
+The individual item reliability represents the true score variance of the item divided by total variance. This should be larger than 0.4. As we can see, we have generally good results. We still have to keep an eye on Im9. 
+
+
+##### Composite/construct reliability
+```{r}
+#Composite/Construct Reliability
+sum.std.loadings<-colSums(std.loadings, na.rm=TRUE)^2
+sum.std.theta<-rowSums(std.theta)
+sum.std.theta=check*sum.std.theta
+CR=sum.std.loadings/(sum.std.loadings+colSums(sum.std.theta))
+CR
+```
+The composite or construct reliabilities exceed the threshold of 0.6, which indicates a satisfactory level of reliability.
+
+##### Average variance extracted
+```{r}
+#Average Variance Extracted 
+std.loadings<- inspect(fit, what="std")$lambda
+std.loadings <- std.loadings^2
+AVE=colSums(std.loadings)/(colSums(sum.std.theta)+colSums(std.loadings))
+AVE
+```
+The average variance extracted is comparable to the proportion of explained variance in factor analysis. It is higher than 0.5 which is good. 
+
+
+#### Standardized loadings
+Now  we can check the standardized loadings squared ("Std.all" in latent variables part). This indicates the variance in the items explain trough the constructs. It should be above 0.6. In our scenario, we observe a value of 0.567 for Im9, which falls below the threshold of 0.6. Consequently, we have decided to remove this question from further analysis.
+
+
+#### Modification indices
+We can also check the modification indices. It represents the anticipated reduction in the chi-square statistic when a specific parameter is liberated and the model is re-evaluated.
+The largest modification index shows the parameter that improves the fit most when set free. 
+
+```{r}
+modificationindices(fit) %>%filter(mi>10)
+```
+As we can see, the error of Prestigious_brands and Im9 are highly correlated. This means that Im9 wants to load on Prestigious_brands (Im9 shares variance with Prestigious_brands that is not taken care of through the construct correlation). The same situation with Stylish. 
+
+The error of Im8 and France are also highly correlated. This means that Im8 want to load on France (share variance with France that is not taken care of through the construct correlation). 
+
+Same situation between Im10 and Im14. It means they share something that is not explained by the model which may be due to the fact that Im8 is also in the same factor.  
+
+Additionally for Im9, we already saw that we have some problem with it as his standardized loadings squared is below 0.6.  
+
+Therefore, we think deleting these two variables is appropriate. 
+
+We can re-perform a PCA with 8 factors and without these variables to be sure that the factors doesn't change. 
+
+
+#### PCA with 8 factors Without 15,8,9 
+```{r}
+IM <- IM %>% select(-c(Im9,Im8))
+PCA8 = principal(IM, rotate="varimax",nfactors=8, scores=TRUE)
+print(PCA8$loadings, cutoff=0.3,sort=TRUE)
+```
+The results are much better now. Only one variable loads on two factors, but that's okay because it loads strongly on one of them. Also, the factors are the same as before. (the factors contain the same images so they have the same "title" as before)
+
+## Confirmatory factor analysis after deleting variables 15 + 8,9
+```{r}
+model_final = "
+
+decoration =~ Im3 + Im4 + Im5
+
+Haute_cuisine =~ Im10 + Im14
+
+Ambiance =~ Im20 + Im21 + Im22
+
+Prestigious_brands =~ Im11 + Im12 + Im13
+
+Assortment =~ Im1 + Im2
+
+Stylish =~ Im17 + Im18
+
+Professional =~ Im16 + Im19
+
+France =~ Im6 + Im7 
+
+"
+
+```
+
+### Fit Assessment
+
+#### Global fit measures 
+
+```{r}
+fit_final = cfa(model_final, data=IM, missing="ML")
+summary_fit_final=summary(fit_final, fit.measures=TRUE,standardized=TRUE)
+summary_fit_final
+```
+
+
+
+
+We should also assess the global fit:
+```{r}
+summary_fit_final$fit[c("chisq","df","rmsea","cfi")]
+```
+
+- Chi2-test: 243.685/124 = 1.965, which is less than 5 so the fit of the model is good.
+
+- Root mean square error of approximation (RMSEA): It is 0.05 which means that our result is good and better than before. 
+
+- Comparative fit index (CFI): The CFI is now 0.978 which improved. The model can be accepted. 
+
+
+#### Standardized loadings
+The standardized loadings squared are all above 0.6. 
+
+
+#### Local fit measures
+
+#### Cronbach's Test
+```{r}
+
+CronReli_decoration = cronbach(subset(IM, select = c(Im3, Im4, Im5)))
+CronReli_haute_cuisine = cronbach(subset(IM, select = c(Im10, Im14)))
+CronReli_ambiance = cronbach(subset(IM, select = c(Im20, Im21, Im22)))
+CronReli_prestigious_brands = cronbach(subset(IM, select = c(Im11, Im12, Im13)))
+CronReli_assortment = cronbach(subset(IM, select = c(Im1, Im2)))
+CronReli_stylish = cronbach(subset(IM, select = c(Im17, Im18)))
+CronReli_professional = cronbach(subset(IM, select = c(Im16, Im19)))
+CronReli_france = cronbach(subset(IM, select = c(Im6, Im7)))
+
+list(
+  CronReli_decoration = CronReli_decoration$alpha,
+  CronReli_haute_cuisine = CronReli_haute_cuisine$alpha,
+  CronReli_ambiance = CronReli_ambiance$alpha,
+  CronReli_prestigious_brands = CronReli_prestigious_brands$alpha,
+  CronReli_assortment = CronReli_assortment$alpha,
+  CronReli_stylish = CronReli_stylish$alpha,
+  CronReli_professional = CronReli_professional$alpha,
+  CronReli_france = CronReli_france$alpha
+)
+
+```
+Cronbach’s alpha coefficient measures the internal consistency, or reliability, of a set of survey items. Cronbach’s alpha quantifies the level of agreement on a standardized 0 to 1 scale. Higher values indicating a higher agreement between items.
+
+We can see that all the cronbach's alpha are above 0.8 which is really good because the threshold is 0.7. This means that we have high internal concistency reliability.
+
+
+##### Individual item reliability
+```{r}
+std.loadings<- inspect(fit_final, what="std")$lambda
+check=std.loadings
+check[check>0] <- 1
+std.loadings[std.loadings==0] <- NA
+std.loadings2 <- std.loadings^2
+std.theta<- inspect(fit_final, what="std")$theta
+
+#Individual item Reliability
+IIR=std.loadings2/(colSums(std.theta)+std.loadings2)
+IIR
+```
+As we can see, we have everything above 0.4 which is good. (This means we have small errors)
+
+##### Composite/construct reliability
+```{r}
+#Composite/Construct Reliability
+sum.std.loadings<-colSums(std.loadings, na.rm=TRUE)^2
+sum.std.theta<-rowSums(std.theta)
+sum.std.theta=check*sum.std.theta
+CR=sum.std.loadings/(sum.std.loadings+colSums(sum.std.theta))
+CR
+```
+The composite or construct reliabilities exceed the threshold of 0.6, which indicates a satisfactory level of reliability.
+
+
+##### Average variance extracted
+```{r}
+#Average Variance Extracted 
+std.loadings<- inspect(fit_final, what="std")$lambda
+std.loadings <- std.loadings^2
+AVE=colSums(std.loadings)/(colSums(sum.std.theta)+colSums(std.loadings))
+AVE
+```
+It is higher than 0.5 which is good. 
+
+#### Modification indices
+We can also check the modification indices:
+```{r}
+modificationindices(fit_final) %>%filter(mi>10)
+```
+Now the modification indices (MI) are fairly consistent and not particularly large.
+
+```{r}
+std_fit=inspect(fit_final, "std")
+std_fit$psi
+```
+Here we can see how latent constructs correlate with each other.
+High correlations between them might indicate a potential issue as the constructs may not be as distinct as theoretically proposed.
+A common threshold is 0.7, in our case it is much lower which is good.
+
+
+## Question 1
+
+In conclusion, the Galeries Lafayette's brand image can be best characterized by eight distinct dimensions: decoration, Haute cuisine, Ambiance, Prestigious brands, Assortment, Stylish, Professional, France. 
+This model meets all the criteria required for both global and local fit.
+
+
+## Section:  Question 2-3
+
+Now, we want to understand if the mechanism driving the satisfaction and affective commitment are similar and if customer satisfaction and affective commitment are mediating the impact of image perceptions on outcome.
+
+
+```{r}
+dataset = survey
+
+model2<-"
+## Measurement model
+decoration =~ Im3 + Im4 + Im5
+
+Haute_cuisine =~ Im10 + Im14
+
+Ambiance =~ Im20 + Im21 + Im22
+
+Prestigious_brands =~ Im11 + Im12 + Im13
+
+Assortment =~ Im1 + Im2
+
+Stylish =~ Im17 + Im18
+
+Professional =~ Im16 + Im19
+
+France =~ Im6 + Im7 
+
+
+ 
+
+Satisfaction = ~ SAT_1 + SAT_2 + SAT_3
+
+Commitment = ~ COM_A1 + COM_A2 + COM_A3 + COM_A4
+
+Repurchase = ~ C_REP1 + C_REP2 + C_REP3
+
+Cocreation = ~ C_CR1 + C_CR3 + C_CR4
+
+  
+
+##Structural model 
+
+
+Repurchase ~ a * Satisfaction + c * Commitment
+
+Cocreation ~ b * Satisfaction + d * Commitment
+
+  
+
+Satisfaction ~ e*decoration + f*Haute_cuisine + g*Ambiance + h*Prestigious_brands + i*Assortment + j*Stylish + k*Professional + l*France
+
+
+Commitment ~ m*decoration + n*Haute_cuisine + o*Ambiance + p*Prestigious_brands + q*Assortment + r*Stylish + s*Professional + t*France
+
+Repurchase ~ cc*decoration + dd*Haute_cuisine + ee*Ambiance + ff*Prestigious_brands + gg*Assortment + hh*Stylish  + ii*Professional + jj*France
+
+Cocreation ~ u*decoration + v*Haute_cuisine + w*Ambiance + x*Prestigious_brands + y*Assortment + z*Stylish + aa*Professional + bb*France
+
+
+
+
+#Indirect effects
+
+
+# -> satisfaction -> repurchase
+ae:=a*e
+af:=a*f
+ag:=a*g
+ah:=a*h
+ai:=a*i
+aj:=a*j
+ak:=a*k
+al:=a*l
+
+# -> commitment -> repurchase
+cm:=c*m
+cn:=c*n
+co:=c*o
+cp:=c*p
+cq:=c*q
+cr:=c*r
+cs:=c*s
+ct:=c*t
+
+# -> satisfaction -> cocreation
+be:=b*e
+bf:=b*f
+bg:=b*g
+bh:=b*h
+bi:=b*i
+bj:=b*j
+bk:=b*k
+bl:=b*l
+
+
+# -> commitment -> cocreation
+dm:=d*m
+dn:=d*n
+do:=d*o
+dp:=d*p
+dq:=d*q
+dr:=d*r
+ds:=d*s
+dt:=d*t
+
+
+
+
+#Total effect
+
+# -> cocreation (direct + satisfaction -> cocreation + -> commitment -> cocreation)
+te1c:= u+(b*e)+(d*m)
+te2c:=v+(b*f)+(d*n)
+te3c:=w+(b*g)+(d*o)
+te4c:=x+(b*h)+(d*p)
+te5c:=y+(b*i)+(d*q)
+te6c:=z+(b*j)+(d*r)
+te7c:=aa+(b*k)+(d*s)
+te8c:=bb+(b*l)+(d*t)
+
+
+# -> repurchase (direct + -> satisfaction -> repurchase + -> commitment -> repurchase)
+te1r:= cc+(a*e)+(c*m)
+te2r:=dd+(a*f)+(c*n)
+te3r:=ee+(a*g)+(c*o)
+te4r:=ff+(a*h)+(c*p)
+te5r:=gg+(a*i)+(c*q)
+te6r:=hh+(a*j)+(c*r)
+te7r:=ii+(a*k)+(c*s)
+te8r:=jj+(a*l)+(c*t)
+
+
+#Total indirect effect
+# -> repurchase 
+ti1r:= (a*e)+(c*m)
+ti2r:=(a*f)+(c*n)
+ti3r:=(a*g)+(c*o)
+ti4r:=(a*h)+(c*p)
+ti5r:=(a*i)+(c*q)
+ti6r:=(a*j)+(c*r)
+ti7r:=(a*k)+(c*s)
+ti8r:=(a*l)+(c*t)
+
+# -> cocreation
+ti1c:=(b*e)+(d*m)
+ti2c:=(b*f)+(d*n)
+ti3c:=(b*g)+(d*o)
+ti4c:=(b*h)+(d*p)
+ti5c:=(b*i)+(d*q)
+ti6c:=(b*j)+(d*r)
+ti7c:=(b*k)+(d*s)
+ti8c:=(b*l)+(d*t)
+
+"
+
+fit2 <- cfa(model2, data=dataset, missing="ML", estimator="MLR")
+
+Sum_fit=summary(fit2, fit.measures=TRUE, standardized=TRUE)
+Sum_fit
+```
+
+```{r}
+semPaths(fit2, nCharNodes = 0, style = "lisrel", rotation = 2)
+```
+
+### Question 2
+
+First, let's check if the mechanism driving satisfaction and affective commitment are similar. For this, we can take a look at the regression part, particularly at results of the factors on the two mediators. 
+We can mention that not all the p-value are smaller than 0.05 which means that we cannot reject all the null hypothesis stating that there is an absence of a relationship between variables. Let's take a look at the significant factors for each mediatior:
+
+![](table1.png)
+
+We can see that it's not the same mechanism that drive satisfaction and affective commitment as it's not the same factors that are significant. For Satisfaction, the main driver is professional as it has the higher standardized estimate. We can also mention that decoration has a negative value which means it has a negative impact on satisfaction. For commitment, the main driver is ambiance as it has the higher standardized estimate. 
+
+We suggest to the galleries lafayette to have a large choice of assortment (Assortment factor). Additionally, they should select an organized and professional staff (profesional factor) to increase the satisfaction of the customers. To drive Commitment they should create a relaxing and intimate atmosphere that should be reflecting the french way of life. However, it seems that a too creative assortment of the shop, tend to drive down the Satisfaction of the customers. Maybe they are looking for something more simple regarding the assortment
+
+Then, we want to know if satisfaction and affective commitment mediate the impact of image perceptions on outcomes. 
+To know if satisfaction and affective commitment mediate the impact of image perceptions on outcomes, we should take a look at the regression part:
+
+![](table2.png)
+    
+Here, the first thing to notice is that all the p-values are smaller than 0.05. This means we can reject the null hypothesis stating that there is an absence of a relationship between variables. This means that satisfaction and affective commitment have a significant impact on Repurchase and Commitment.
+
+For repurchase intention, the two standardized estimates are higher than zero and close to 0.3. We can mention that it is higher for commitment which means that affective commitment is a bit more driving the repurchase intention compared to satisfaction. 
+
+For Cocreation intention, the standardized estimated of commitment is positive while for satisfaction it is negative. This means that satisfaction has a negative impact on Cocreation. 
+In other words, the higher the customer's satisfaction with Galeries Lafayette, the less inclined they are to participate in its development, perhaps because they believe there is little room for improvement.
+On the other hand, customers who are deeply attached to Galeries Lafayette are more eager to contribute to its improvement.
+
+
+If we want to know which Images have been mediated, we should take a look at this table (after deleting >0.05):
+
+![](table3.png)
+
+For example, we can see that satisfaction mediates the effect of assortment on Repurchase intention. This means that the more the customer is satisfied with Assortment, total satisfaction would be higher which lead to high likelihood of repurchase behavior intention. We can do the same for each line to understand how satisfaction or commitment mediates each factors for each outcomes. 
+
+We can conclude that both mediators mediate the impact of image perceptions on the two outcomes (Repurchase and cocreation)
+
+
+
+### Question 3 
+
+Now to understand what is driving the two distinct outcomes (repurchase and co-creation) we can rank the image dimensions with respect to the total effect which is equal to the sum of the indirect effect and the direct effect:
+
+![](table4.png)
+We can look at this table:
+![](table5.png)
+
+We can see that Ambiance is the only factor that has a significant total effect. The total effect are quit the same for cocreation and repurchase. 
+
+We suggest to the galleries lafayettes to have a nice ambiance in order to increase the repurchase and cocreation intention. 
+
+
+
+
+
+
+
+
+
+
+```{r}
+0.45/sqrt(0.752)
+```
+
